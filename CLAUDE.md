@@ -4,72 +4,60 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-A single-file classification backend (`scanner_prototype.py`) that classifies items against NYC
-DSNY/311 curbside recycling rules (article KA-02013). It's a FastAPI app exposing `POST /classify`:
-the frontend uploads an image (captured client-side, e.g. from a browser webcam), the image is sent
-to Gemini 3.5 Flash-Lite for structured classification, and the result is returned as JSON in the HTTP
-response (and also written to `classified_item.json` as a local debug artifact).
+EcoVision NYC is a full-stack app that classifies items against NYC DSNY/311 curbside recycling
+rules (article KA-02013): a browser captures a photo (webcam), sends it to the backend, which sends
+it to Gemini for structured classification, and the frontend renders the result (bin color, recycle/
+compost/trash category, prep instructions, rough weight/CO2 estimates).
 
-## Setup and running
+- `server/` — FastAPI backend. See `server/README.md` for setup/run/architecture.
+- `client/` — Next.js frontend. See `client/README.md` for setup/run.
+
+## Running both halves
+
+Backend (from `server/`):
 
 ```bash
 pip install -r requirements.txt
+# copy .env.example to .env and fill in GEMINI_API_KEY, or set it in your shell
+uvicorn main:app --reload
 ```
 
-Requires a `GEMINI_API_KEY` environment variable (checked at startup; the script exits with setup
-instructions if unset):
-
-```powershell
-$env:GEMINI_API_KEY = "your-api-key-here"   # current PowerShell session
-setx GEMINI_API_KEY "your-api-key-here"     # persist for new shells
-```
-
-Run the server:
+Frontend (from `client/`, in a second terminal):
 
 ```bash
-uvicorn scanner_prototype:app --reload
+npm install
+npm run dev
 ```
 
-or:
-
-```bash
-python scanner_prototype.py
-```
-
-Both serve on `http://localhost:8000`. Test the endpoint with:
-
-```bash
-curl -F "file=@some_image.jpg" http://localhost:8000/classify
-```
-
-Syntax-check without running (no API key needed):
-
-```bash
-python -m py_compile scanner_prototype.py
-```
-
-There is no test suite, linter, or build step configured in this repo.
+Frontend runs on `http://localhost:3000` and calls the backend at `http://127.0.0.1:8000` by default
+(override with `NEXT_PUBLIC_API_BASE_URL`).
 
 ## Architecture
 
-Everything lives in `scanner_prototype.py`, structured in this order:
+### Backend (`server/`)
 
-1. **Env check** — fails fast if `GEMINI_API_KEY` is missing.
-2. **`NYCWasteClassification`** (Pydantic model) — the structured output schema Gemini is forced to
-   return: `item_name`, `material_type`, `nyc_stream_category`, `bin_color`, `is_recyclable`,
-   `preparation_instructions`, `nyc_rule_notes`, `estimated_weight_grams`, `estimated_co2_grams`.
-   The weight and CO2 fields are rough LLM visual estimates (no scale, size reference, or lifecycle
-   dataset is available from a single image), not real measurements — treat them as approximate.
-   This is also the exact JSON shape returned by `POST /classify`.
-3. **`SYSTEM_INSTRUCTION`** — encodes the actual NYC bin-routing rules (blue/green/brown/black/special
-   disposal categories and their edge cases, e.g. plastic film and styrofoam are trash despite being
-   plastic), plus guidance for the weight and CO2 estimates. This prompt *is* the business logic —
-   changes to sorting rules go here, not in code.
-4. **`classify_image()`** — sends a PIL image to `gemini-3.5-flash-lite` with the schema + system
-   instruction, adds a `captured_at` timestamp (from the local clock, not Gemini) to the output, and
-   writes the result to `classified_item.json`. It lets exceptions propagate — the FastAPI endpoint
-   is responsible for turning API/network/validation failures into an HTTP error response.
-5. **FastAPI app (`app`)** — `POST /classify` accepts a multipart-uploaded image (`UploadFile`),
-   decodes it with Pillow, calls `classify_image()`, and returns the result as JSON
-   (`response_model=NYCWasteClassification`). Invalid image bytes → 400; classification failure →
-   502. CORS is enabled for `http://localhost:3000` (the Next.js dev client).
+- `config.py` — loads `.env`, fails fast if `GEMINI_API_KEY` is missing, exposes `FRONTEND_ORIGIN`
+  (used for CORS).
+- `schemas.py` — `NYCWasteClassification`, the structured output schema Gemini is forced to return.
+  This is also the exact JSON shape returned by `POST /classify`.
+- `nyc_rules.py` — `SYSTEM_INSTRUCTION`, encoding the actual NYC bin-routing rules (blue/green/brown/
+  black/special disposal categories and their edge cases, e.g. plastic film and styrofoam are trash
+  despite being plastic). This prompt *is* the business logic — changes to sorting rules go here.
+- `classifier.py` — `classify_image()` sends a PIL image to `gemini-3.5-flash-lite` with the schema +
+  system instruction, stamps `captured_at` from the local clock (not Gemini), and writes the result to
+  `classified_item.json` as a local debug artifact. Lets exceptions propagate — `main.py` turns
+  API/network/validation failures into HTTP error responses.
+- `main.py` — the FastAPI app: CORS (origin from `FRONTEND_ORIGIN`), `GET /health`, and
+  `POST /classify` (multipart image upload via `UploadFile` → decodes with Pillow → 400 on invalid
+  image, 502 on classification failure).
+
+There is no test suite or linter configured for the backend.
+
+### Frontend (`client/`)
+
+Next.js (App Router) + React 19 + Tailwind v4. `app/page.tsx` holds the scan/dashboard state and
+calls `POST /classify` with the captured frame. Components live in `app/components/`:
+`Scanner` (webcam capture), `ScanResultCard` (latest classification), `DashboardStats` (stats, chart,
+recent-history preview with a "View All" button), `HistoryModal` (full scan history), `Header`.
+Shared types are in `app/types/index.ts` — `VisionAPIResponse` mirrors the backend's
+`NYCWasteClassification` schema exactly; keep the two in sync if the schema changes.

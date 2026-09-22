@@ -5,6 +5,7 @@ import Header from "./components/Header";
 import Scanner from "./components/Scanner";
 import ScanResultCard from "./components/ScanResultCard";
 import DashboardStats from "./components/DashboardStats";
+import HistoryModal from "./components/HistoryModal";
 import { VisionAPIResponse, ExtendedScanResult, HistoryLog, DashboardStats as StatsType } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -18,6 +19,7 @@ export default function EcoDashboard() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ExtendedScanResult | null>(null);
   const [error, setError] = useState<string>("");
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const [stats, setStats] = useState<StatsType>({
     totalScans: 142,
@@ -81,7 +83,7 @@ export default function EcoDashboard() {
           co2: co2Impact > 0 ? `+${co2Impact.toFixed(2)}` : "0.00",
           time: "Just now"
         },
-        ...prev.slice(0, 4)
+        ...prev.slice(0, 19)
       ]);
 
       setChartData(prev => {
@@ -110,12 +112,20 @@ export default function EcoDashboard() {
         </section>
 
         {/* RIGHT COLUMN */}
-        <DashboardStats 
-          stats={stats} 
-          chartData={chartData} 
-          recentHistory={recentHistory} 
+        <DashboardStats
+          stats={stats}
+          chartData={chartData}
+          recentHistory={recentHistory}
+          onViewAll={() => setIsHistoryOpen(true)}
         />
       </main>
+
+      <HistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        history={recentHistory}
+      />
+
       {error ? (
         <section className="max-w-7xl mx-auto mt-6 rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-red-300">
           {error}

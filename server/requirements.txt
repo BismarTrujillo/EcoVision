@@ -1,5 +1,7 @@
 fastapi
 uvicorn[standard]
-opencv-python
+python-multipart
 google-genai
+pydantic
+pillow
 python-dotenv
